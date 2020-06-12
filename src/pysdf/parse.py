@@ -164,6 +164,7 @@ class SDF(object):
       self.from_model(kwargs['model'])
 
 
+
   def from_file(self, filename):
     if not os.path.exists(filename):
       print('Failed to open SDF because %s does not exist' % filename)
@@ -280,6 +281,7 @@ class Model(SpatialEntity):
     self.submodels = []
     self.links = []
     self.joints = []
+    self.transmissions = []
     self.root_link = None
     if 'tree' in kwargs:
       self.from_tree(kwargs['tree'], **kwargs)
@@ -303,6 +305,9 @@ class Model(SpatialEntity):
       '\n',
       '  joints:\n',
       '    %s' % '\n    '.join([indent(str(j), 4) for j in self.joints]),
+      '\n',
+      '  transmissions:\n',
+      '    %s' % '\n    '.join([indent(str(t), 4) for t in self.transmissions]),
       '\n',
       '  submodels:\n',
       '    %s' % '\n    '.join([indent(str(m), 4) for m in self.submodels]),
@@ -345,7 +350,10 @@ class Model(SpatialEntity):
     self.version = kwargs.get('version', self.version)
     super(Model, self).from_tree(node, **kwargs)
     self.links = [Link(self, tree=link_node) for link_node in node.findall('link')]
-    self.joints = [Joint(self, tree=joint_node) for joint_node in node.findall('joint')]
+    for joint_node in node.findall('joint'):
+      joint = Joint(self, tree=joint_node)
+      self.joints.append(joint)
+      self.transmissions.append(Transmission(joint))
 
     for include_node in node.findall('include'):
       included_submodel = model_from_include(self, include_node)
@@ -361,7 +369,7 @@ class Model(SpatialEntity):
     else:
       full_prefix = ''
 
-    for entity in self.joints + self.links:
+    for entity in self.joints + self.links + self.transmissions:
       entity.add_urdf_elements(node, full_prefix)
     for submodel in self.submodels:
       submodel.add_urdf_elements(node, full_prefix)
@@ -518,7 +526,6 @@ class Model(SpatialEntity):
     return name
 
 
-
 class Link(SpatialEntity):
   def __init__(self, parent_model, **kwargs):
     super(Link, self).__init__(**kwargs)
@@ -583,8 +590,6 @@ class Link(SpatialEntity):
   def get_full_name(self):
     return self.parent_model.get_full_name() + '::' + self.name
     
-
-
 
 class Joint(SpatialEntity):
   def __init__(self, parent_model, **kwargs):
@@ -669,6 +674,40 @@ class Joint(SpatialEntity):
     return self.parent_model.get_full_name() + '::' + self.name
 
 
+class Transmission:
+  i = 0 #Used to name transmission instances
+  trans_default_name = "trans"
+  act_default_name = "act"
+
+  def __init__(self, joint, name="", actuator_name="", mechanical_reduction=1):
+    if (not name) or (not actuator_name): Transmission.i+=1
+
+    self.joint = joint
+    self.name = name if name else Transmission.trans_default_name + str(Transmission.i)
+    self.actuator_name = actuator_name if actuator_name else Transmission.act_default_name + str(Transmission.i)
+    self.mechanical_reduction = str(mechanical_reduction)
+
+  def __repr__(self):
+    return ''.join((
+      'Transmission(\n',
+      '  transmission: %s\n' % indent(self.name, 2),
+      '  type: %s\n' % indent("transmission_interface/SimpleTransmission", 2),
+      '  joint: %s\n' % indent(self.joint.name, 2),
+      '  actuator: %s\n' % indent(self.actuator_name, 2),
+      '  mechanical reduction: %s\n' % indent(self.mechanical_reduction, 2),
+      ')'
+    ))
+
+  def add_urdf_elements(self, node, prefix):
+    trans = ET.SubElement(node, "transmission", {"name": self.name})
+    mtype = ET.SubElement(trans, "type")
+    mtype.text = "transmission_interface/SimpleTransmission"
+    joint = ET.SubElement(trans, "joint", {"name":self.joint.name})
+    ihard = ET.SubElement(joint, "hardwareInterface")
+    ihard.text = "EffortJointInterface"
+    act = ET.SubElement(trans, "actuator", {"name":self.actuator_name})
+    mechred = ET.SubElement(act, "mechanicalReduction")
+    mechred.text = self.mechanical_reduction
 
 
 class Axis(object):
@@ -855,7 +894,6 @@ class LinkPart(SpatialEntity):
       if mesh_found:
         mesh_path = 'package://' + mesh_found
       else:
-        print('Could not find mesh %s in %s' % (mesh_file, catkin_ws_path))
         mesh_path = 'package://PATHTOMESHES/' + mesh_file
       meshnode = ET.SubElement(geometrynode, 'mesh', {'filename': mesh_path, 'scale': self.geometry_data['scale']})
 
