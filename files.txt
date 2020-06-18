@@ -1,0 +1,2 @@
+/usr/local/bin/sdf2urdf.py
+/usr/local/lib/python2.7/dist-packages/pysdf-1.0-py2.7.egg

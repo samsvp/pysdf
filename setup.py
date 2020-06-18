@@ -1,9 +1,11 @@
-from distutils.core import setup
-from catkin_pkg.python_setup import generate_distutils_setup
+from setuptools import setup, find_packages
 
-d = generate_distutils_setup(
-  packages=['pysdf'],
-  package_dir={'': 'src'}
+setup(
+  name = 'pysdf',
+  version = '1.0',
+  description = 'Sdf to urdf converter',
+  author = 'me',
+  author_email = 'myemail@mail',
+  packages = find_packages(include=['pysdf', 'pysdf.*', 'pysdf/bin/*']),
+  scripts = ['pysdf/bin/sdf2urdf.py']
 )
-
-setup(**d)

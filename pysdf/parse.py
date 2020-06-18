@@ -8,97 +8,27 @@ from xml.etree.ElementTree import ParseError
 import xml.dom.minidom
 import glob
 
+import rospkg
 from tf.transformations import *
 
 from naming import *
 from conversions import *
 
-models_paths = [os.path.expanduser('~/.gazebo/models/')]
 
-if 'GAZEBO_MODEL_PATH' in os.environ:
-  model_path_env = os.environ['GAZEBO_MODEL_PATH'].split(':')
-  models_paths = models_paths + model_path_env
-
-mesh_path_env_name='MESH_WORKSPACE_PATH'
-if mesh_path_env_name in os.environ:
-  catkin_ws_path = os.environ[mesh_path_env_name]
-else:
-  catkin_ws_path = os.path.expanduser('~') + '/catkin_ws/src/'
+project = ""
 supported_sdf_versions = [1.4, 1.5, 1.6]
 
-catkin_ws_path_exists = os.path.exists(catkin_ws_path)
 
-if not catkin_ws_path_exists:
-  print ('----------------------------------------------------------')
-  print ('Path (%s) does not exist.' % catkin_ws_path)
-  print ('Please either set/change %s, or change ' % mesh_path_env_name)
-  print ('the catkin_ws_path variable inside pysdf/parse.py')
-  print ('----------------------------------------------------------')
-  sys.exit(1)
+def find_mesh(my_mesh):
+  dirs = list(os.walk(rospkg.RosPack().get_path(project)))
+  mesh_path = next(path for path in dirs if path[0].endswith("meshes"))[0] + "/" + my_mesh.split("/")[-1]
+  mesh_project_path = mesh_path[mesh_path.index(project):]
+  return mesh_project_path
+
 
 def sanitize_xml_input_name(text):
   ### removes whitespaces before and after the tag text
   return text.strip()
-
-def find_mesh_in_catkin_ws(filename):
-  if not find_mesh_in_catkin_ws.cache:
-    result = ''
-    for root, dirs, files in os.walk(catkin_ws_path, followlinks=True):
-      for currfile in files:
-        if currfile.endswith('.stl') or currfile.endswith('.dae'):
-          partial_path = ''
-          for path_part in root.split('/'):
-            partial_path += path_part + '/'
-            if os.path.exists(partial_path + '/package.xml'):
-              break
-          catkin_stack_path = partial_path.replace(path_part + '/', '')
-          filename_path = os.path.join(root, currfile).replace(catkin_stack_path, '')
-          #print('Adding %s to mesh cache (catkin_stack_path=%s)' % (filename_path, catkin_stack_path))
-          find_mesh_in_catkin_ws.cache.append(filename_path)
-    #print(find_mesh_in_catkin_ws.cache)
-  matching = [path for path in find_mesh_in_catkin_ws.cache if filename in path]
-  return ' OR '.join(matching)
-
-find_mesh_in_catkin_ws.cache = []
-
-
-def find_model_in_gazebo_dir(modelname):
-  canonical_sdf_name = 'model.sdf'
-  if not find_model_in_gazebo_dir.cache:
-    for models_path in models_paths:
-      for dirpath, dirs, files in os.walk(models_path, followlinks=True):
-        if canonical_sdf_name in files:
-          files.remove(canonical_sdf_name)
-          files = [canonical_sdf_name] + files
-        for currfile in files:
-          if not currfile.endswith('.sdf'):
-            continue
-          filename_path = os.path.join(dirpath, currfile)
-          try:
-            tree = ET.parse(filename_path)
-          except ParseError as e:
-              print("Error parsing SDF file %s (%s). Ignoring model and continuing." % (filename_path, e))
-              continue
-          root = tree.getroot()
-          if root.tag != 'sdf':
-            continue
-          modelnode = get_node(root, 'model')
-          if modelnode == None:
-            continue
-          modelname_in_file = modelnode.attrib['name']
-          if modelname_in_file not in find_model_in_gazebo_dir.cache:
-            #print('Adding (name=%s, path=%s) to model cache' % (modelname_in_file, filename_path))
-            find_model_in_gazebo_dir.cache[modelname_in_file] = filename_path
-    #print(find_model_in_gazebo_dir.cache)
-  if '/' in modelname:  # path-based
-    for models_path in models_paths + ['.']:
-      modelfile_paths = glob.glob(os.path.join(models_path, modelname, '*.sdf'))
-      for modelfile_path in modelfile_paths:
-        if os.path.exists(modelfile_path):
-          return modelfile_path
-  else:  # name-based
-    return find_model_in_gazebo_dir.cache.get(modelname)
-find_model_in_gazebo_dir.cache = {}
 
 
 def pose2origin(node, pose):
@@ -152,11 +82,11 @@ def homogeneous_times_vector(homogeneous, vector):
   return res[:3,3].T 
 
 
-
-
-
 class SDF(object):
-  def __init__(self, **kwargs):
+  def __init__(self, _project, **kwargs):
+    global path_to_meshes, project
+
+    project = _project
     self.world = World()
     if 'file' in kwargs:
       self.from_file(kwargs['file'])
@@ -877,6 +807,8 @@ class LinkPart(SpatialEntity):
 
 
   def add_urdf_elements(self, node, prefix, link_pose, part_type):
+    global path_to_meshes
+    
     if not self.geometry_type:
       return
     partnode = ET.SubElement(node, part_type, {'name': sdf2tfname(prefix + '::' + self.name if prefix else self.name)})
@@ -890,11 +822,7 @@ class LinkPart(SpatialEntity):
       spherenode = ET.SubElement(geometrynode, 'sphere', {'radius': self.geometry_data['radius']})
     elif self.geometry_type == 'mesh':
       mesh_file = '/'.join(self.geometry_data['uri'].split('/')[3:])
-      mesh_found = find_mesh_in_catkin_ws(mesh_file)
-      if mesh_found:
-        mesh_path = 'package://' + mesh_found
-      else:
-        mesh_path = 'package://PATHTOMESHES/' + mesh_file
+      mesh_path = 'package://' +  find_mesh(mesh_file)
       meshnode = ET.SubElement(geometrynode, 'mesh', {'filename': mesh_path, 'scale': self.geometry_data['scale']})
 
 
