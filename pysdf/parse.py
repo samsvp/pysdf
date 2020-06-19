@@ -535,9 +535,6 @@ class Joint(SpatialEntity):
     self.tree_child_link = None
     if 'tree' in kwargs:
       self.from_tree(kwargs['tree'])
-    # Change tags because a urdf model doesn't suppor fixed joints
-    if self.type == "fixed": self.type = "revolute"
-    if self.urdf_type == "fixed": self.urdf_type = "revolute"
 
 
   def __repr__(self):
@@ -582,9 +579,7 @@ class Joint(SpatialEntity):
     else: # joint crosses includes
       pose2origin(jointnode, concatenate_matrices(inverse_matrix(parent_pose_world), self.tree_child_link.pose_world))
     if self.type == 'revolute' and self.axis.lower_limit == 0 and self.axis.upper_limit == 0:
-      # self.urdf_type = 'fixed'
-      # set as revolute so that we can apply control to it
-      self.urdf_type = 'revolute'
+      self.urdf_type = 'fixed'
       jointnode.attrib['type'] = self.urdf_type
     elif self.type == 'universal':
       # Simulate universal robot as

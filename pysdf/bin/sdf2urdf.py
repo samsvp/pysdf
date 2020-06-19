@@ -22,5 +22,5 @@ if len(world.models) != 1:
   sys.exit(1)
 
 model = world.models[0]
-#print(model)
+print(model)
 model.save_urdf(args.urdf, prefix='' if args.prefix else None)
