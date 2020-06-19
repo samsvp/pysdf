@@ -318,6 +318,13 @@ class Model(SpatialEntity):
     urdf_file.close()
 
 
+  def save_urdf_with_plugin(self, filename, plugins, prefix=''):
+    with open(filename, 'w') as urdf_file:
+      pretty_urdf_string = prettyXML(self.to_urdf_string(prefix))
+      urdf_string = pretty_urdf_string.split("</robot>")[0] + plugins + "\n</robot>"
+      urdf_file.write(urdf_string)
+
+
   def get_joint(self, requested_jointname, prefix = ''):
     #print('get_joint: n=%s rj=%s p=%s' % (self.name, requested_jointname, prefix))
     full_prefix = prefix + '::' if prefix else ''
@@ -610,6 +617,8 @@ class Transmission:
   act_default_name = "act"
 
   def __init__(self, joint, name="", actuator_name="", mechanical_reduction=1):
+    if joint.type == "fixed": return
+
     if (not name) or (not actuator_name): Transmission.i+=1
 
     self.joint = joint
@@ -618,6 +627,8 @@ class Transmission:
     self.mechanical_reduction = str(mechanical_reduction)
 
   def __repr__(self):
+    if not hasattr(self, 'joint'): return ""
+
     return ''.join((
       'Transmission(\n',
       '  transmission: %s\n' % indent(self.name, 2),
@@ -629,6 +640,9 @@ class Transmission:
     ))
 
   def add_urdf_elements(self, node, prefix):
+    # No control is applied to fixed joints
+    if not hasattr(self, 'joint'): return
+
     trans = ET.SubElement(node, "transmission", {"name": self.name})
     mtype = ET.SubElement(trans, "type")
     mtype.text = "transmission_interface/SimpleTransmission"

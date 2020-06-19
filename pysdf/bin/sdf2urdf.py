@@ -13,6 +13,15 @@ parser.add_argument('-p', '--plot', nargs=1, help='Plot SDF to file')
 parser.add_argument('--prefix', action='store_true', help='Use model name as name prefix')
 args = parser.parse_args()
 
+plugin = """
+<gazebo>
+  <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+    <robotNamespace>/dji_e2000pro</robotNamespace>
+    <topicName>ros_control</topicName>
+  </plugin>
+</gazebo>
+"""
+
 sdf = pysdf.SDF(args.project, file=args.sdf)
 world = sdf.world
 if args.plot:
@@ -22,5 +31,5 @@ if len(world.models) != 1:
   sys.exit(1)
 
 model = world.models[0]
-print(model)
-model.save_urdf(args.urdf, prefix='' if args.prefix else None)
+#print(model)
+model.save_urdf_with_plugin(args.urdf, plugin, prefix='' if args.prefix else None)
