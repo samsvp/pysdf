@@ -17,7 +17,35 @@ from conversions import *
 
 project = ""
 supported_sdf_versions = [1.4, 1.5, 1.6]
+models_paths = [os.path.expanduser('~/.gazebo/models/')]
+models_cache = {}
 
+def find_model_in_gazebo_dir(modelname):
+  canonical_sdf_name = 'model.sdf'
+  if modelname in models_cache: return models_cache[modelname]
+  
+  for models_path in models_paths:
+    for dirpath, dirs, files in os.walk(models_path + modelname, followlinks=True):
+      for currfile in files:
+        if not currfile.endswith('.sdf'):
+          continue
+        filename_path = os.path.join(dirpath, currfile)
+        try:
+          tree = ET.parse(filename_path)
+        except ParseError as e:
+            print("Error parsing SDF file %s (%s). Ignoring model and continuing." % (filename_path, e))
+            continue
+        root = tree.getroot()
+        
+        if root.tag != 'sdf': continue
+        modelnode = get_node(root, 'model')
+        
+        if modelnode == None: continue
+        
+        modelname_in_file = modelnode.attrib['name']
+
+        models_cache[modelname] = filename_path
+        return filename_path
 
 def find_mesh(my_mesh):
   dirs = list(os.walk(rospkg.RosPack().get_path(project)))
@@ -174,6 +202,11 @@ class World(object):
       model.for_all_joints(func, **kwargs)
 
 
+  def for_all_transmissions(self, func, **kwargs):
+    for model in self.models:
+      model.for_all_transmissions(func, **kwargs)
+
+
   def for_all_submodels(self, func, **kwargs):
     for model in self.models:
       model.for_all_submodels(func, **kwargs)
@@ -321,8 +354,12 @@ class Model(SpatialEntity):
   def save_urdf_with_plugin(self, filename, plugins, prefix=''):
     with open(filename, 'w') as urdf_file:
       pretty_urdf_string = prettyXML(self.to_urdf_string(prefix))
-      urdf_string = pretty_urdf_string.split("</robot>")[0] + plugins + "\n</robot>"
+      urdf_string = pretty_urdf_string.split("</robot>")[0] + self.unroll_plugins(plugins) + "\n</robot>"
       urdf_file.write(urdf_string)
+
+
+  def unroll_plugins(self, plugins):
+    return '\n'.join([plugin % self.name for plugin in plugins])
 
 
   def get_joint(self, requested_jointname, prefix = ''):
@@ -443,6 +480,14 @@ class Model(SpatialEntity):
       func(joint, full_prefix + '::' + joint.name, **kwargs)
     for submodel in self.submodels:
       submodel.for_all_joints(func, full_prefix, **kwargs)
+  
+
+  def for_all_transmissions(self, func, prefix = '', **kwargs):
+    full_prefix = prefix + '::' + self.name if prefix else self.name
+    for transmission in self.transmissions:
+      func(transmission, full_prefix + '::' + joint.name, **kwargs)
+    for submodel in self.submodels:
+      submodel.for_all_transmissions(func, full_prefix, **kwargs)
 
 
   def for_all_submodels(self, func, prefix = '', **kwargs):
@@ -642,14 +687,15 @@ class Transmission:
   def add_urdf_elements(self, node, prefix):
     # No control is applied to fixed joints
     if not hasattr(self, 'joint'): return
+    full_prefix = prefix + '::' if prefix else ''
 
-    trans = ET.SubElement(node, "transmission", {"name": self.name})
+    trans = ET.SubElement(node, "transmission", {"name": sdf2tfname(full_prefix + self.name)})
     mtype = ET.SubElement(trans, "type")
     mtype.text = "transmission_interface/SimpleTransmission"
-    joint = ET.SubElement(trans, "joint", {"name":self.joint.name})
+    joint = ET.SubElement(trans, "joint", {"name": sdf2tfname(full_prefix + self.joint.name)})
     ihard = ET.SubElement(joint, "hardwareInterface")
-    ihard.text = "EffortJointInterface"
-    act = ET.SubElement(trans, "actuator", {"name":self.actuator_name})
+    ihard.text = "hardware_interface/EffortJointInterface"
+    act = ET.SubElement(trans, "actuator", {"name": sdf2tfname(full_prefix +self.actuator_name)})
     mechred = ET.SubElement(act, "mechanicalReduction")
     mechred.text = self.mechanical_reduction
 
