@@ -19,6 +19,7 @@ project = ""
 supported_sdf_versions = [1.4, 1.5, 1.6]
 models_paths = [os.path.expanduser('~/.gazebo/models/')]
 models_cache = {}
+subprojects = []
 
 def find_model_in_gazebo_dir(modelname):
   canonical_sdf_name = 'model.sdf'
@@ -40,17 +41,17 @@ def find_model_in_gazebo_dir(modelname):
         if root.tag != 'sdf': continue
         modelnode = get_node(root, 'model')
         
-        if modelnode == None: continue
+        if modelnode is None: continue
         
         modelname_in_file = modelnode.attrib['name']
 
         models_cache[modelname] = filename_path
         return filename_path
 
-def find_mesh(my_mesh):
-  dirs = list(os.walk(rospkg.RosPack().get_path(project)))
+def find_mesh(my_mesh, ros_project):
+  dirs = list(os.walk(rospkg.RosPack().get_path(ros_project)))
   mesh_path = next(path for path in dirs if path[0].endswith("meshes"))[0] + "/" + my_mesh.split("/")[-1]
-  mesh_project_path = mesh_path[mesh_path.index(project):]
+  mesh_project_path = mesh_path[mesh_path.index(ros_project):]
   return mesh_project_path
 
 
@@ -100,7 +101,7 @@ def model_from_include(parent, include_node):
       return
     submodel_name = get_tag(include_node, 'name')
     submodel_pose = get_tag_pose(include_node)
-    return Model(parent, name=submodel_name, pose=submodel_pose, file=submodel_path)
+    return Model(parent, name=submodel_name, pose=submodel_pose, file=submodel_path, project=submodel_uri)
 
 
 def homogeneous_times_vector(homogeneous, vector):
@@ -229,7 +230,7 @@ class SpatialEntity(object):
 
 
   def from_tree(self, node, **kwargs):
-    if node == None:
+    if node is None:
       return
     self.name = node.attrib['name']
     self.pose = get_tag_pose(node)
@@ -246,6 +247,7 @@ class Model(SpatialEntity):
     self.joints = []
     self.transmissions = []
     self.root_link = None
+    self.project = kwargs.get("project", project)
     if 'tree' in kwargs:
       self.from_tree(kwargs['tree'], **kwargs)
     elif 'file' in kwargs:
@@ -305,7 +307,7 @@ class Model(SpatialEntity):
 
 
   def from_tree(self, node, **kwargs):
-    if node == None:
+    if node is None:
       return
     if node.tag != 'model':
       print('Invalid node of type %s instead of model. Aborting.' % node.tag)
@@ -326,16 +328,16 @@ class Model(SpatialEntity):
       self.submodels.append(included_submodel)
 
 
-  def add_urdf_elements(self, node, prefix = ''):
+  def add_urdf_elements(self, node, prefix = '', ros_project = project):
     if prefix is not None:
       full_prefix = prefix + '::' + self.name if prefix else self.name
     else:
       full_prefix = ''
 
     for entity in self.joints + self.links + self.transmissions:
-      entity.add_urdf_elements(node, full_prefix)
+      entity.add_urdf_elements(node, full_prefix, self.project)
     for submodel in self.submodels:
-      submodel.add_urdf_elements(node, full_prefix)
+      submodel.add_urdf_elements(node, full_prefix, self.project)
 
 
   def to_urdf_string(self, prefix=''):
@@ -538,7 +540,7 @@ class Link(SpatialEntity):
 
 
   def from_tree(self, node):
-    if node == None:
+    if node is None:
       return
     if node.tag != 'link':
       print('Invalid node of type %s instead of link. Aborting.' % node.tag)
@@ -551,7 +553,7 @@ class Link(SpatialEntity):
   def is_empty(self):
     return len(self.visuals) == 0 and len(self.collisions) == 0
 
-  def add_urdf_elements(self, node, prefix):
+  def add_urdf_elements(self, node, prefix, ros_project):
     full_prefix = prefix + '::' if prefix else ''
     linknode = ET.SubElement(node, 'link', {'name': sdf2tfname(full_prefix + self.name)})
     # urdf links do not have a coordinate system themselves, only their parts (inertial, collision, visual) have one
@@ -564,9 +566,9 @@ class Link(SpatialEntity):
       urdf_pose = self.pose_world
     self.inertial.add_urdf_elements(linknode, urdf_pose)
     for collision in self.collisions:
-      collision.add_urdf_elements(linknode, prefix, urdf_pose)
+      collision.add_urdf_elements(linknode, prefix, urdf_pose, ros_project)
     for visual in self.visuals:
-      visual.add_urdf_elements(linknode, prefix, urdf_pose)
+      visual.add_urdf_elements(linknode, prefix, urdf_pose, ros_project)
 
 
   def get_full_name(self):
@@ -604,7 +606,7 @@ class Joint(SpatialEntity):
 
 
   def from_tree(self, node):
-    if node == None:
+    if node is None:
       return
     if node.tag != 'joint':
       print('Invalid node of type %s instead of joint. Aborting.' % node.tag)
@@ -619,7 +621,7 @@ class Joint(SpatialEntity):
       self.axis2 = Axis(self, tree=get_node(node, 'axis2'))
 
 
-  def add_urdf_elements(self, node, prefix):
+  def add_urdf_elements(self, node, prefix, ros_project):
     full_prefix = prefix + '::' if prefix else ''
     jointnode = ET.SubElement(node, 'joint', {'name': sdf2tfname(full_prefix + self.name)})
     parentnode = ET.SubElement(jointnode, 'parent', {'link': sdf2tfname(full_prefix + self.parent)})
@@ -684,7 +686,7 @@ class Transmission:
       ')'
     ))
 
-  def add_urdf_elements(self, node, prefix):
+  def add_urdf_elements(self, node, prefix, ros_project):
     # No control is applied to fixed joints
     if not hasattr(self, 'joint'): return
     full_prefix = prefix + '::' if prefix else ''
@@ -720,7 +722,7 @@ class Axis(object):
 
 
   def from_tree(self, node):
-    if node == None:
+    if node is None:
       return
     if node.tag != 'axis' and node.tag != 'axis2':
       print('Invalid node of type %s instead of axis(2). Aborting.' % node.tag)
@@ -728,7 +730,7 @@ class Axis(object):
     self.xyz = numpy.array(get_tag(node, 'xyz').split())
     self.use_parent_model_frame = bool(get_tag(node, 'use_parent_model_frame'))
     limitnode = get_node(node, 'limit')
-    if limitnode == None:
+    if limitnode is None:
       print('limit Tag missing from joint. Aborting.')
       return
     self.lower_limit = float(get_tag(limitnode, 'lower', 0))
@@ -776,7 +778,7 @@ class Inertial(object):
 
 
   def from_tree(self, node):
-    if node == None:
+    if node is None:
       return
     if node.tag != 'inertial':
       print('Invalid node of type %s instead of inertial. Aborting.' % node.tag)
@@ -812,7 +814,7 @@ class Inertia(object):
 
 
   def from_tree(self, node):
-    if node == None:
+    if node is None:
       return
     if node.tag != 'inertia':
       print('Invalid node of type %s instead of inertia. Aborting.' % node.tag)
@@ -839,14 +841,14 @@ class LinkPart(SpatialEntity):
 
 
   def from_tree(self, node):
-    if node == None:
+    if node is None:
       return
     if node.tag != 'visual' and node.tag != 'collision':
       print('Invalid node of type %s instead of visual or collision. Aborting.' % node.tag)
       return
     super(LinkPart, self).from_tree(node)
     gnode = get_node(node, 'geometry')
-    if gnode == None:
+    if gnode is None:
       return
     for gtype in self.gtypes:
       typenode = get_node(gnode, gtype)
@@ -866,9 +868,9 @@ class LinkPart(SpatialEntity):
     return '%s geometry_type: %s, geometry_data: %s' % (super(LinkPart, self).__repr__().replace('\n', ', ').strip(), self.geometry_type, self.geometry_data)
 
 
-  def add_urdf_elements(self, node, prefix, link_pose, part_type):
+  def add_urdf_elements(self, node, prefix, link_pose, part_type, ros_project):
     global path_to_meshes
-    
+
     if not self.geometry_type:
       return
     partnode = ET.SubElement(node, part_type, {'name': sdf2tfname(prefix + '::' + self.name if prefix else self.name)})
@@ -882,7 +884,7 @@ class LinkPart(SpatialEntity):
       spherenode = ET.SubElement(geometrynode, 'sphere', {'radius': self.geometry_data['radius']})
     elif self.geometry_type == 'mesh':
       mesh_file = '/'.join(self.geometry_data['uri'].split('/')[3:])
-      mesh_path = 'package://' +  find_mesh(mesh_file)
+      mesh_path = 'package://' +  find_mesh(mesh_file, ros_project)
       meshnode = ET.SubElement(geometrynode, 'mesh', {'filename': mesh_path, 'scale': self.geometry_data['scale']})
 
 
@@ -896,8 +898,8 @@ class Collision(LinkPart):
     return 'Collision(%s)' % super(Collision, self).__repr__()
 
 
-  def add_urdf_elements(self, node, prefix, link_pose):
-    super(Collision, self).add_urdf_elements(node, prefix, link_pose, 'collision')
+  def add_urdf_elements(self, node, prefix, link_pose, ros_project):
+    super(Collision, self).add_urdf_elements(node, prefix, link_pose, 'collision', ros_project)
 
 
 
@@ -910,5 +912,5 @@ class Visual(LinkPart):
     return 'Visual(%s)' % super(Visual, self).__repr__()
 
 
-  def add_urdf_elements(self, node, prefix, link_pose):
-    super(Visual, self).add_urdf_elements(node, prefix, link_pose, 'visual')
+  def add_urdf_elements(self, node, prefix, link_pose, ros_project):
+    super(Visual, self).add_urdf_elements(node, prefix, link_pose, 'visual', ros_project)
