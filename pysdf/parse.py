@@ -49,8 +49,9 @@ def find_model_in_gazebo_dir(modelname):
         return filename_path
 
 def find_mesh(my_mesh, ros_project):
+  mesh_name = my_mesh.split("/")[-1]
   dirs = list(os.walk(rospkg.RosPack().get_path(ros_project)))
-  mesh_path = next(path for path in dirs if path[0].endswith("meshes"))[0] + "/" + my_mesh.split("/")[-1]
+  mesh_path = next(path for path in dirs if path[0].endswith("meshes") and mesh_name in path[-1])[0] + "/" + mesh_name
   mesh_project_path = mesh_path[mesh_path.index(ros_project):]
   return mesh_project_path
 
